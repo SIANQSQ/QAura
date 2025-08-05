@@ -299,7 +299,7 @@ void setup() {
   FastLED.addLeds<WS2812B, LED6_PIN, GRB>(LED6, LED6_COUNT);
   FastLED.addLeds<WS2812B, LED7_PIN, GRB>(LED7, LED7_COUNT);
   FastLED.setBrightness(brightness);
-  FastLED.show(); // 初始化LED为关闭状态
+  FastLED.show();
   
   // 连接WiFi
   WiFi.begin(ssid, password);
@@ -323,17 +323,12 @@ void setup() {
   server.begin();
   Serial.println("HTTP server started");
 
-
-
-
-  // 配置ADC
-  analogSetAttenuation(ADC_11db);  // 设置衰减，可测量更大范围的电压
-  analogSetWidth(12);              // 设置ADC分辨率为12位(0-4095)
+  analogSetAttenuation(ADC_11db);  // 设置衰减
+  analogSetWidth(12);              // 设置ADC分辨率为12位
   
-  Serial.println("MAX9812 ADC读取示例开始");
-  Serial.print("采样率: ");
-  Serial.print(SAMPLE_RATE);
-  Serial.println(" Hz");
+  // Serial.print("采样率: ");
+  // Serial.print(SAMPLE_RATE);
+  // Serial.println(" Hz");
   
   bootEffect();
 }
