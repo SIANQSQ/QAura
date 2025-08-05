@@ -25,7 +25,7 @@
 #define LED7_COUNT 55
 #define LED8_COUNT 55
 uint16_t LED_COUNT[9] = {0,LED1_COUNT,LED2_COUNT,LED3_COUNT,LED4_COUNT,LED5_COUNT,LED6_COUNT,LED7_COUNT,LED8_COUNT};
-int8_t LED_DeltaHUE[9] = {0,1,-1,1,1,1,1,1,1};
+int8_t LED_DeltaHUE[9] = {0,1,-1,1,1,1,1,1,1}; //色相变化步长，用于设置彩虹流动方向
 
 // 定义连接到MAX9812输出的ADC引脚
 #define MAX9812_OUTPUT_PIN 34  // ESP32的ADC1_CH6引脚
@@ -55,9 +55,7 @@ enum LightMode {
   RAINBOW, 
   BREATHING, 
   COLOR_WIPE,
-  VOLUM_MAP,
-  CONFETTI,
-  THEATER_CHASE
+  VOLUM_MAP
 };
 
 LightMode currentMode = VOLUM_MAP;
@@ -68,7 +66,7 @@ uint8_t hue[9] = {0};                 // 色相值
 uint8_t target = 1;
 uint8_t LEDMode[9]={2,2,2,2,2,2,2,2,2};
 uint16_t MIDLED[9]={0,1+LED1_COUNT/2,1+LED2_COUNT/2,1+LED3_COUNT/2,1+LED4_COUNT/2,1+LED5_COUNT/2,1+LED6_COUNT/2,1+LED7_COUNT/2,1+LED8_COUNT/2};
-// 函数前置声明
+
 void updateLEDs();
 void handleSetTarget();
 
@@ -144,12 +142,10 @@ void updateLED(CRGB* led,uint8_t LEDlabel)
       break;
       
     case RAINBOW:
-      // 彩虹效果
       fill_rainbow(led, LED_COUNT[LEDlabel], hue[LEDlabel]++);
       break;
       
     case BREATHING: {
-      // 用大括号创建局部作用域
       static uint8_t breathVal = 0;
       static bool breathDir = true;
       
@@ -170,22 +166,17 @@ void updateLED(CRGB* led,uint8_t LEDlabel)
     }
     case VOLUM_MAP:
       {
-              // 读取多个样本并计算平均值，减少噪声影响
         int total = 0;
         for (int i = 0; i < SAMPLES_PER_READ; i++) {
           total += analogRead(MAX9812_OUTPUT_PIN);
-          delayMicroseconds(1000000 / SAMPLE_RATE);  // 控制采样率
+          delayMicroseconds(1000000 / SAMPLE_RATE); 
         }
         
         int averageValue = total / SAMPLES_PER_READ;
-        
-        // 将ADC值转换为电压 (假设参考电压为3.3V)
         int voltage = averageValue * (54 / 4095.0);
         Serial.print(voltage);
         FastLED.clear();
         fill_rainbow(LED2, voltage, hue[LEDlabel]);
-        
-        // 短延迟，控制输出速率
         delay(50);
         break;
       }
@@ -198,8 +189,6 @@ void updateLEDs()
   static unsigned long lastUpdate = 0;
   unsigned long now = millis();
   static uint8_t offset = 0;
-  
-  // 根据速度参数控制更新频率
   if (now - lastUpdate < map(speed, 0, 100, 50, 5)) {
     return;
   }
