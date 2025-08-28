@@ -16,17 +16,18 @@
 
 #define PORT        80      // HTTP端口
 
-#define LED1_COUNT 55
-#define LED2_COUNT 55
-#define LED3_COUNT 55
-#define LED4_COUNT 55
-#define LED5_COUNT 55
-#define LED6_COUNT 55
-#define LED7_COUNT 55
-#define LED8_COUNT 55
+#define LED1_COUNT 53  //桌子下
+#define LED2_COUNT 22  //显示器下
+#define LED3_COUNT 26  //显示器上
+#define LED4_COUNT 39  //桌子上  
+#define LED5_COUNT 33  //桌子侧面
+#define LED6_COUNT 0
+#define LED7_COUNT 0
+#define LED8_COUNT 0
 uint16_t LED_COUNT[9] = {0,LED1_COUNT,LED2_COUNT,LED3_COUNT,LED4_COUNT,LED5_COUNT,LED6_COUNT,LED7_COUNT,LED8_COUNT};
 int8_t LED_DeltaHUE[9] = {0,1,-1,1,1,1,1,1,1}; //色相变化步长，用于设置彩虹流动方向
-
+LightMode LED_Mode[9] = {OFF,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW}; //各灯带默认模式
+CRGB LED_Color[9] = {CRGB::Black,CRGB::Red,CRGB::Green,CRGB::Blue,CRGB::White,CRGB::Yellow,CRGB::Cyan,CRGB::Purple,CRGB::Orange}; //各灯带默认静态颜色
 // 定义连接到MAX9812输出的ADC引脚
 #define MAX9812_OUTPUT_PIN 34  // ESP32的ADC1_CH6引脚
 
@@ -48,6 +49,7 @@ CRGB LED5[LED5_COUNT];
 CRGB LED6[LED6_COUNT];
 CRGB LED7[LED7_COUNT];
 CRGB LED8[LED8_COUNT];
+
 // 灯光模式枚举
 enum LightMode { 
   OFF, 
@@ -184,6 +186,31 @@ void updateLED(CRGB* led,uint8_t LEDlabel)
 }
 }
 
+void WIFI_Task(void *pvParameters)
+{
+  // 连接WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  
+  server.on("/", handleRoot);
+  server.on("/set_target",handleSetTarget);
+  server.on("/set_mode", handleSetMode);
+  server.on("/set_color", handleSetColor);
+  server.on("/set_brightness", handleSetBrightness);
+  server.on("/set_speed", handleSetSpeed);
+  
+  server.begin();
+  Serial.println("HTTP server started");
+  vTaskDelete(NULL);
+}
+
 void updateLEDs() 
 {
   static unsigned long lastUpdate = 0;
@@ -301,27 +328,10 @@ void setup() {
   FastLED.setBrightness(brightness);
   FastLED.show();
   
-  // 连接WiFi
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  
-  Serial.println("\nWiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+
 
   // 设置HTTP路由
-  server.on("/", handleRoot);
-  server.on("/set_target",handleSetTarget);
-  server.on("/set_mode", handleSetMode);
-  server.on("/set_color", handleSetColor);
-  server.on("/set_brightness", handleSetBrightness);
-  server.on("/set_speed", handleSetSpeed);
-  
-  server.begin();
-  Serial.println("HTTP server started");
+ 
 
   analogSetAttenuation(ADC_11db);  // 设置衰减
   analogSetWidth(12);              // 设置ADC分辨率为12位
@@ -329,7 +339,7 @@ void setup() {
   // Serial.print("采样率: ");
   // Serial.print(SAMPLE_RATE);
   // Serial.println(" Hz");
-  
+  xTaskCreate(WIFI_Task, "WIFI_Task", 4096, NULL, 1, NULL);
   bootEffect();
 }
 
@@ -338,3 +348,4 @@ void loop() {
   updateLEDs();
 }
 
+ 
