@@ -8,7 +8,7 @@ from PIL import Image, ImageTk
 
 
 
-esp32_ip = "172.20.10.2"
+esp32_ip = "172.20.10.4"
 
 def send_color(r, g, b):
         try:

@@ -26,7 +26,7 @@
 #define LED8_COUNT 0
 uint16_t LED_COUNT[9] = {0,LED1_COUNT,LED2_COUNT,LED3_COUNT,LED4_COUNT,LED5_COUNT,LED6_COUNT,LED7_COUNT,LED8_COUNT};
 int8_t LED_DeltaHUE[9] = {0,1,-1,1,1,1,1,1,1}; //色相变化步长，用于设置彩虹流动方向
-LightMode LED_Mode[9] = {OFF,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW}; //各灯带默认模式
+
 CRGB LED_Color[9] = {CRGB::Black,CRGB::Red,CRGB::Green,CRGB::Blue,CRGB::White,CRGB::Yellow,CRGB::Cyan,CRGB::Purple,CRGB::Orange}; //各灯带默认静态颜色
 // 定义连接到MAX9812输出的ADC引脚
 #define MAX9812_OUTPUT_PIN 34  // ESP32的ADC1_CH6引脚
@@ -66,7 +66,7 @@ uint8_t brightness = 100;        // 默认亮度
 uint8_t speed = 50;              // 默认速度
 uint8_t hue[9] = {0};                 // 色相值
 uint8_t target = 1;
-uint8_t LEDMode[9]={2,2,2,2,2,2,2,2,2};
+LightMode LED_Mode[9] = {OFF,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW}; //各灯带默认模式
 uint16_t MIDLED[9]={0,1+LED1_COUNT/2,1+LED2_COUNT/2,1+LED3_COUNT/2,1+LED4_COUNT/2,1+LED5_COUNT/2,1+LED6_COUNT/2,1+LED7_COUNT/2,1+LED8_COUNT/2};
 
 void updateLEDs();
@@ -76,14 +76,14 @@ void handleSetTarget();
 
 
 void handleRoot() {
-  server.send(200, "text/plain", "WS2812B Controller (FastLED) Ready");
+  server.send(200, "text/plain", "Welcome to QAura");
 }
 
 void handleSetMode() {
-  handleSetTarget();
-  if (server.hasArg("mode")) {
+  if (server.hasArg("mode")&&server.hasArg("channel")) {
     int mode = server.arg("mode").toInt();
-    LEDMode[target] = static_cast<LightMode>(mode);
+    int channel = server.arg("channel").toInt();
+    LED_Mode[channel] = static_cast<LightMode>(mode);
     server.send(200, "text/plain", "Mode set: " + String(mode));
   } else {
     server.send(400, "text/plain", "Missing mode parameter");
@@ -91,12 +91,26 @@ void handleSetMode() {
 }
 
 void handleSetColor() {
-  handleSetTarget();
-  if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
+  if (server.hasArg("channel") && server.hasArg("r") && server.hasArg("g") && server.hasArg("b") && server.hasArg("sync")) {
     uint8_t r = server.arg("r").toInt();
     uint8_t g = server.arg("g").toInt();
     uint8_t b = server.arg("b").toInt();
-    currentColor = CRGB(r, g, b);
+    uint8_t sync = server.arg("sync").toInt(); //
+    Serial.print(sync);
+    if(sync == 1)
+    {
+        for(int i=1;i<=8;i++)
+        {
+            LED_Mode[i] = STATIC_COLOR;
+            LED_Color[i] = CRGB(r, g, b);
+            Serial.print("change mode");
+        }
+    }
+    else
+    {
+        int channel = server.arg("channel").toInt();
+        LED_Color[channel] = CRGB(r, g, b);
+    }
     server.send(200, "text/plain", "Color set");
   } else {
     server.send(400, "text/plain", "Missing color parameters");
@@ -125,22 +139,22 @@ void handleSetSpeed() {
 void handleSetTarget() {
   if (server.hasArg("target")) {
     target = server.arg("target").toInt();
-    server.send(200, "text/plain", "Target set: " + String(target));
+    //server.send(200, "text/plain", "Target set: " + String(target));
   } else {
-    server.send(400, "text/plain", "Missing target parameter");
+    //server.send(400, "text/plain", "Missing target parameter");
   }
 }
 
 void updateLED(CRGB* led,uint8_t LEDlabel)
 {
-  switch(LEDMode[LEDlabel]) 
+  switch(LED_Mode[LEDlabel]) 
   {
     case OFF:
       fill_solid(led, LED_COUNT[LEDlabel], CRGB::Black);
       break;
       
     case STATIC_COLOR:
-      fill_solid(led, LED_COUNT[LEDlabel], currentColor);
+      fill_solid(led, LED_COUNT[LEDlabel], LED_Color[LEDlabel]);
       break;
       
     case RAINBOW:
