@@ -81,17 +81,14 @@ void updateLEDs();
 
 void parseSerialCommand() {
   if (Serial.available() > 0) {
-    Serial.println("Listening for serial commands...");
-    String input = Serial.readStringUntil('\n'); // 读取直到换行符
-    input.trim(); // 去除首尾空白字符
+    //Serial.println("Listening for serial commands...");
+    String input = Serial.readStringUntil('\n'); 
+    input.trim(); 
     
     int mode, r, g, b;
     float peak; // 添加peak变量
     if (sscanf(input.c_str(), "%d,%d,%d,%d,%f", &mode, &r, &g, &b, &peak) == 5) {
-      // 成功解析了4个整数
       //Serial.printf("解析成功: mode=%d, r=%d, g=%d, b=%d, peak=%f\n", mode, r, g, b, peak);
-
-      // 在这里使用解析后的值
       if(mode == 1)
       {
         SCREEN_Color=CRGB(r, g, b);
@@ -107,12 +104,14 @@ void parseSerialCommand() {
         {
           Use_Audio_Specific_Color = false;
         }
+        if(peak<=0.0){peak = 0.0;}
+        else if(peak>=1.0)peak = 1.0;
         Peak = peak;
       }
     } 
     else 
     {
-      Serial.println("解析失败，格式应为: mode,r,g,b");
+      Serial.println("解析失败，格式应为: mode,r,g,b,peak");
     }
   }
 }
@@ -201,7 +200,7 @@ void handleSetSpeed() {
 }
 
 void updateLED(CRGB* led, uint8_t LEDlabel) {
-  if (xSemaphoreTake(ledMutex, 100 / portTICK_PERIOD_MS) == pdTRUE) {  // 获取锁
+  if (xSemaphoreTake(ledMutex, 100 / portTICK_PERIOD_MS) == pdTRUE) {  
     switch (LED_Mode[LEDlabel]) {
       case OFF:
         fill_solid(led, LED_COUNT[LEDlabel], CRGB::Black);
@@ -229,14 +228,14 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
       }
       case VOLUM_MAP:
         fill_solid(led, LED_COUNT[LEDlabel], CRGB::Black);
-        if(Use_Audio_Specific_Color){fill_solid(led, Peak*LED_COUNT[LEDlabel], AUDIO_Color);}
-        else{fill_rainbow(led,floor(Peak*LED_COUNT[LEDlabel]), hue[LEDlabel]++);}
+        if(Use_Audio_Specific_Color){fill_solid(led, floor(Peak*(LED_COUNT[LEDlabel]-1)), AUDIO_Color);}
+        else{fill_rainbow(led,floor(Peak*(LED_COUNT[LEDlabel]-1)), hue[LEDlabel]++);}
         break;
       case SCREEN:
-        fill_solid(led, LED_COUNT[LEDlabel], SCREEN_Color);  // 读取SCREEN_Color
+        fill_solid(led, LED_COUNT[LEDlabel], SCREEN_Color); 
         break;
     }
-    xSemaphoreGive(ledMutex);  // 释放锁
+    xSemaphoreGive(ledMutex); 
   }
 }
 
@@ -399,8 +398,9 @@ void setup() {
   FastLED.addLeds<WS2812B, LED3_PIN, GRB>(LED3, LED3_COUNT);
   FastLED.addLeds<WS2812B, LED4_PIN, GRB>(LED4, LED4_COUNT);
   FastLED.addLeds<WS2812B, LED5_PIN, GRB>(LED5, LED5_COUNT);
-  //FastLED.addLeds<WS2812B, LED6_PIN, GRB>(LED6, LED6_COUNT);
-  //FastLED.addLeds<WS2812B, LED7_PIN, GRB>(LED7, LED7_COUNT);
+  FastLED.addLeds<WS2812B, LED6_PIN, GRB>(LED6, LED6_COUNT);
+  FastLED.addLeds<WS2812B, LED7_PIN, GRB>(LED7, LED7_COUNT);
+  FastLED.addLeds<WS2812B, LED8_PIN, GRB>(LED8, LED8_COUNT);
   FastLED.setBrightness(brightness);
   FastLED.show();
   

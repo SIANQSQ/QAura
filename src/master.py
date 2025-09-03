@@ -5,7 +5,7 @@ import websocket
 import threading
 import socket
 import time
-import json
+import sys
 import winreg
 import pyautogui
 import serial
@@ -13,17 +13,27 @@ import serial.tools.list_ports
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 from comtypes import CLSCTX_ALL
 from ctypes import cast, POINTER
+import pystray
+from pystray import MenuItem as item
+from PIL import Image, ImageDraw
 
 LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","---","---","---"]
 modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5)]
 WS2812B_Pin = [4,18,19,21,22,23,25,26]
 LED_Num = [53,22,28,39,33,0,0,0]
+
+
 class MultiChannelLEDControlApp:
     def __init__(self, master):
         self.master = master
         master.title("QAura Master")
         master.geometry("1000x1000")
-        
+        self.master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+        self.master.iconbitmap('icon.ico')
+        # 托盘相关变量
+        self.tray = None
+        self.tray_running = False
+
         # 设置主题
         self.style = ttk.Style()
         self.style.theme_use('vista')
@@ -69,7 +79,8 @@ class MultiChannelLEDControlApp:
         
         # 启动连接监控
         self.monitor_connection()
-    
+        
+        self.create_tray_icon()
     def create_widgets(self):
         # 主框架
         main_frame = ttk.Frame(self.master)
@@ -508,8 +519,8 @@ class MultiChannelLEDControlApp:
                     self.mode_combos[i].set(modes[mode_id][0])
                 except Exception as e:
                     self.status_bar.config(text=f"错误: {str(e)}")
-            self.status_bar.config(text="所有通道已同步")
-            self.log_diagnostic("同步所有通道")
+            #self.status_bar.config(text="所有通道已同步")
+            #self.log_diagnostic("同步所有通道")
             return
         try:
             response = requests.get(
@@ -851,6 +862,13 @@ class MultiChannelLEDControlApp:
         def audio_serial_worker():
             self.audio_running = True
             self.status_bar.config(text=f"成功启动音频监听线程")
+
+            # 视觉效果增强参数
+            peak_hold = 0.0  # 用于峰值保持效果
+            peak_decay = 0.95  # 峰值衰减速率 (值越小衰减越快)
+            min_threshold = 0.02  # 最小阈值，过滤微小声音
+            response_curve = 1.5  # 响应曲线指数，值越大对强信号越敏感
+
             while self.audio_running:
                 try:
                     try:
@@ -858,27 +876,37 @@ class MultiChannelLEDControlApp:
                             self.audio_gain.set(0)
                     except:
                         self.audio_gain.set(1.0)
-                    peak = float(self.audio_gain.get()) * self.meter.GetPeakValue()
-                    if(peak>=1.0): peak = 0.9999
-                    if(self.audio_use_specific_color.get()):
-                        self.send_audio_command(2, self.audio_r, self.audio_g, self.audio_b, peak)
+
+                    # 获取原始音频峰值
+                    raw_peak = float(self.audio_gain.get()) * self.meter.GetPeakValue()
+
+                    # 应用响应曲线，增强视觉动态范围
+                    processed_peak = raw_peak ** response_curve
+
+                    # 峰值保持
+                    if processed_peak > peak_hold:
+                        peak_hold = processed_peak
                     else:
-                        self.send_audio_command(2, -1, -1, -1, peak)
-                    self.log_diagnostic(f"音频峰值: {peak}")
-                    if self.serial_port.in_waiting:
-                        response = self.serial_port.readline().decode('utf-8').strip()
-                        print(f"ESP32响应: {response}")
+                        peak_hold *= peak_decay 
+
+                    if peak_hold < min_threshold:
+                        peak_hold = 0.0
+
+                    final_peak = round(min(peak_hold, 0.999), 5)
+
+                    # 发送控制命令
+                    if self.audio_use_specific_color.get():
+                        self.send_audio_command(2, self.audio_r, self.audio_g, self.audio_b, final_peak)
+                    else:
+                        self.send_audio_command(2, -1, -1, -1, final_peak)
+
+                    #self.log_diagnostic(f"音频峰值: {final_peak}")
+
                 except Exception as e:
-                    self.status_bar.config(text=f"音频线程错误: {e}")
-                    # devices = AudioUtilities.GetSpeakers()
-                    # interface = devices.Activate(
-                    #     IAudioMeterInformation._iid_, 
-                    #     CLSCTX_ALL, 
-                    #     None
-                    # )
-                    # self.meter = cast(interface, POINTER(IAudioMeterInformation))
-                    time.sleep(1/30)  # 30Hz
-        
+                    self.status_bar.config(text=f"音频线程错误: {e},请尝试重新切换至音频模式")
+
+                time.sleep(1/60)  
+
         self.audio_thread = threading.Thread(target=audio_serial_worker, daemon=True)
         self.audio_thread.start()
 
@@ -886,7 +914,97 @@ class MultiChannelLEDControlApp:
         self.status_bar.config(text=f"成功停止音频监听线程")
         # print("Stopping audio thread")
         self.audio_running = False
+    
+    def create_tray_icon(self):
+        # 确保只创建一个托盘图标实例
+        if self.tray is None:
+            # 创建一个简单的图标
+            image = Image.open("icon.ico")
 
+            # 创建托盘菜单
+            menu = (
+                item('显示主窗口', self.show_window),
+                item('关闭灯光', self.stray_close_lights),
+                item('彩虹', self.stray_rainbow),
+                item('纯色', self.stray_static_color),
+                item('呼吸', self.stray_breathing),
+                item('音频', self.stray_audio),
+                item('屏幕', self.stray_screen),
+                item('退出', self.exit_app)
+            )
+            
+            # 创建托盘图标
+            self.tray = pystray.Icon("QAura", image, "QAura Master", menu)
+
+    def minimize_to_tray(self):
+        # 隐藏主窗口
+        self.master.withdraw()
+        
+        # 检查托盘是否在运行，如果没有则启动
+        if not self.tray_running:
+            self.tray_running = True
+            # 在单独线程中运行托盘，避免阻塞
+            threading.Thread(target=self.run_tray, daemon=True).start()
+        else:
+            self.tray.visible = True
+
+    def run_tray(self):
+        # 运行托盘图标
+        if self.tray:
+            self.tray.run()
+            self.tray_running = False
+
+    def show_window(self, icon=None, item=None):
+        # 显示主窗口
+        self.master.deiconify()
+        # 将窗口提到最前
+        self.master.lift()
+        self.master.attributes('-topmost', True)
+        self.master.attributes('-topmost', False)
+
+        # 不停止托盘，只隐藏图标
+        if icon:
+            icon.visible = False
+
+    def exit_app(self, icon=None, item=None):
+        # 停止托盘服务
+        if self.tray:
+            self.tray.stop()
+            self.tray = None
+        
+        # 销毁主窗口
+        self.master.destroy()
+        # 退出程序
+        sys.exit()
+    
+    def stray_close_lights(self, icon=None, item=None):
+        self.set_mode(-1, 0)
+
+    def stray_static_color(self, icon=None, item=None):
+        self.set_mode(-1, 1)
+
+    def stray_rainbow(self, icon=None, item=None):
+        self.set_mode(-1, 2)
+    
+    def stray_rainbow(self, icon=None, item=None):
+        self.set_mode(-1, 2)
+
+    def stray_rainbow(self, icon=None, item=None):
+        self.set_mode(-1, 2)
+    
+    def stray_rainbow(self, icon=None, item=None):
+        self.set_mode(-1, 2)
+    
+    def stray_breathing(self, icon=None, item=None):
+        self.set_mode(-1, 3)
+    
+    def stray_audio(self, icon=None, item=None):
+        self.set_mode(-1, 4)
+
+    def stray_screen(self, icon=None, item=None):
+        self.set_mode(-1, 5)
+    
+    
 if __name__ == "__main__":
     root = tk.Tk()
     app = MultiChannelLEDControlApp(root)
