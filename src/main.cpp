@@ -3,7 +3,9 @@
 #include <FastLED.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-//#include <>
+#include <WebSocketsServer.h>
+#include <ArduinoJson.h>
+
 
 
 #define LED1_PIN     4       // WS2812B数据引脚    
@@ -16,12 +18,12 @@
 #define LED8_PIN     26
 
 #define PORT        80      // HTTP端口
-
+#define PORT_WS     81      // WebSocket端口
 #define LED1_COUNT 53  //桌子下
 #define LED2_COUNT 22  //显示器下
 #define LED3_COUNT 28  //显示器上
 #define LED4_COUNT 39  //桌子上  
-#define LED5_COUNT 33  //桌子侧面
+#define LED5_COUNT 23  //桌子侧面
 #define LED6_COUNT 0
 #define LED7_COUNT 0
 #define LED8_COUNT 0
@@ -44,6 +46,7 @@ const char* password = "qsq20060823"; // 修改为你的WiFi密码
 
 
 WebServer server(PORT);
+WebSocketsServer webSocket = WebSocketsServer(PORT_WS); // WebSocket服务器，端口81
 CRGB LED1[LED1_COUNT];
 CRGB LED2[LED2_COUNT];
 CRGB LED3[LED3_COUNT];
@@ -78,6 +81,83 @@ float Peak = 0.0;  // 记录当前音量峰值
 bool Use_Audio_Specific_Color = false;
 void updateLEDs();
 
+bool clientConnected = false;
+int clientNum = 0; // 记录当前连接的客户端编号
+void processJsonData(uint8_t client_num, String jsonString);
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[%u] 客户端断开连接!\n", num);
+      clientConnected = false;
+      break;
+      
+    case WStype_CONNECTED:
+      {
+        IPAddress ip = webSocket.remoteIP(num);
+        Serial.printf("[%u] 客户端已连接: %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+        clientConnected = true;
+        clientNum = num;
+        
+        // 发送欢迎消息
+        String welcomeMsg = "{\"type\":\"welcome\",\"message\":\"Connected to QAura WebSocket server\"}";
+        webSocket.sendTXT(num, welcomeMsg);
+      }
+      break;
+      
+    case WStype_TEXT:
+      {
+        // 将接收到的数据转换为字符串
+        String jsonString = String((char*)payload);
+        //Serial.printf("[%u] 接收到 JSON 数据: %s\n", num, jsonString.c_str());
+        
+        // 处理 JSON 数据
+        processJsonData(num, jsonString);
+      }
+      break;
+      
+    case WStype_ERROR:
+      Serial.printf("[%u] 错误!\n", num);
+      break;
+      
+    default:
+      break;
+  }
+}
+
+// 处理 JSON 数据
+void processJsonData(uint8_t client_num, String jsonString) {
+  // 创建 JSON 文档
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, jsonString);
+  
+  // 检查解析错误
+  if (error) {
+    Serial.print("JSON 解析错误: ");
+    Serial.println(error.c_str());
+    
+    // 发送错误响应
+    String errorResponse = "{\"type\":\"error\",\"message\":\"Invalid JSON format\"}";
+    webSocket.sendTXT(client_num, errorResponse);
+    return;
+  }
+  
+  // 获取 JSON 类型
+  String type = doc["type"].as<String>();
+  
+  // 根据类型处理不同的请求
+  if (type == "serial_pack") {
+    // 处理命令请求
+    int specific_color = doc["value"].as<int>();
+    int r = doc["r"].as<int>();
+    int g = doc["g"].as<int>();
+    int b = doc["b"].as<int>();
+    float rec_peak = doc["peak"].as<float>();
+    Peak = rec_peak;
+    SCREEN_Color = CRGB(r, g, b);
+    Use_Audio_Specific_Color = (specific_color == 1);
+    Serial.printf("Received serial_pack: specific_color=%d, r=%d, g=%d, b=%d, peak=%f\n", specific_color, r, g, b, Peak);
+}
+}
 
 void parseSerialCommand() {
   if (Serial.available() > 0) {
@@ -229,7 +309,12 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
       case VOLUM_MAP:
         fill_solid(led, LED_COUNT[LEDlabel], CRGB::Black);
         if(Use_Audio_Specific_Color){fill_solid(led, floor(Peak*(LED_COUNT[LEDlabel]-1)), AUDIO_Color);}
-        else{fill_rainbow(led,floor(Peak*(LED_COUNT[LEDlabel]-1)), hue[LEDlabel]++);}
+        else if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || 
+                LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || 
+                LED_Mode[5]==SCREEN || LED_Mode[6]==SCREEN || 
+                LED_Mode[7]==SCREEN || LED_Mode[8]==SCREEN  )
+        {fill_solid(led, floor(Peak*(LED_COUNT[LEDlabel]-1)), SCREEN_Color);}
+        else {fill_rainbow(led,floor(Peak*(LED_COUNT[LEDlabel]-1)), hue[LEDlabel]++);}
         break;
       case SCREEN:
         fill_solid(led, LED_COUNT[LEDlabel], SCREEN_Color); 
@@ -242,6 +327,7 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
 void Server_Task(void *pvParameters) {
   for (;;) {
     server.handleClient();
+    webSocket.loop();
     vTaskDelay(1);
   }
 }
@@ -266,8 +352,10 @@ void WIFI_Task(void *pvParameters)
   server.on("/set_speed", handleSetSpeed);
   
   server.begin();
+  webSocket.onEvent(webSocketEvent);
+  webSocket.begin();
   Serial.println("HTTP server started");
-  xTaskCreate(Server_Task, "Server_Task", 4096, NULL, 1, NULL);
+  xTaskCreate(Server_Task, "Server_Task", 4096*2, NULL, 1, NULL);
   vTaskDelete(NULL);
 }
 
@@ -279,14 +367,17 @@ void updateLEDs()
   if (now - lastUpdate < map(speed, 0, 100, 50, 5)) {
     return;
   }
-  if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || LED_Mode[5]==SCREEN || LED_Mode[6]==SCREEN || LED_Mode[7]==SCREEN || LED_Mode[8]==SCREEN)
-  {
-    parseSerialCommand();
-  }
-  if(LED_Mode[1]==VOLUM_MAP || LED_Mode[2]==VOLUM_MAP || LED_Mode[3]==VOLUM_MAP || LED_Mode[4]==VOLUM_MAP || LED_Mode[5]==VOLUM_MAP || LED_Mode[6]==VOLUM_MAP || LED_Mode[7]==VOLUM_MAP || LED_Mode[8]==VOLUM_MAP)
-  {
-    parseSerialCommand();
-  }
+//   if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || 
+//      LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || 
+//      LED_Mode[5]==SCREEN || LED_Mode[6]==SCREEN || 
+//      LED_Mode[7]==SCREEN || LED_Mode[8]==SCREEN ||
+//      LED_Mode[1]==VOLUM_MAP || LED_Mode[2]==VOLUM_MAP || 
+//      LED_Mode[3]==VOLUM_MAP || LED_Mode[4]==VOLUM_MAP || 
+//      LED_Mode[5]==VOLUM_MAP || LED_Mode[6]==VOLUM_MAP || 
+//      LED_Mode[7]==VOLUM_MAP || LED_Mode[8]==VOLUM_MAP )
+//   {
+//     parseSerialCommand();
+//   }
   lastUpdate = now;
   updateLED(LED1,1);
   updateLED(LED2,2);
@@ -388,6 +479,8 @@ void LED_Task(void *pvParameters) {
 }
 void setup() {
   Serial.begin(115200);
+
+  Serial.println("QAura 启动中...");
   ledMutex = xSemaphoreCreateMutex();
   if (ledMutex == NULL) {
     Serial.println("互斥锁创建失败！系统可能内存不足");
@@ -409,14 +502,14 @@ void setup() {
   // 设置HTTP路由
  
 
-//   analogSetAttenuation(ADC_11db);  // 设置衰减
-//   analogSetWidth(12);              // 设置ADC分辨率为12位
+  //   analogSetAttenuation(ADC_11db);  // 设置衰减
+  //   analogSetWidth(12);              // 设置ADC分辨率为12位
   
   // Serial.print("采样率: ");
   // Serial.print(SAMPLE_RATE);
   // Serial.println(" Hz");
   bootEffect();
-  xTaskCreatePinnedToCore(WIFI_Task, "WIFI_Task", 2048, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(WIFI_Task, "WIFI_Task", 4096, NULL, 1, NULL, 0);
   
   xTaskCreatePinnedToCore(LED_Task, "LED_Task", 4096, NULL, 1, NULL, 0);
 }
