@@ -57,11 +57,12 @@ enum LightMode {
   RAINBOW, 
   BREATHING, 
   VOLUM_MAP,
-  SCREEN
+  SCREEN,
+  GRADIENT
 };
 
 LightMode currentMode = VOLUM_MAP;
-CRGB currentColor = CRGB::White; // 默认白色
+CRGB Breathing_Color = CRGB::White; // 默认白色
 CRGB SCREEN_Color = CRGB::Black;
 CRGB AUDIO_Color = CRGB::Black;
 uint8_t brightness = 100;        // 默认亮度
@@ -70,6 +71,7 @@ uint8_t hue[9] = {0};                 // 色相值
 uint8_t target = 1;
 LightMode LED_Mode[9] = {OFF,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW}; //各灯带默认模式
 //LightMode LED_Mode[9] = {OFF,SCREEN,SCREEN,SCREEN,SCREEN,SCREEN,SCREEN,SCREEN,SCREEN};
+//LightMode LED_Mode[9] = {OFF,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT};
 uint16_t MIDLED[9]={0,1+LED1_COUNT/2,1+LED2_COUNT/2,1+LED3_COUNT/2,1+LED4_COUNT/2,1+LED5_COUNT/2,1+LED6_COUNT/2,1+LED7_COUNT/2,1+LED8_COUNT/2};
 float Peak = 0.0;  // 记录当前音量峰值
 bool Use_Audio_Specific_Color = false;
@@ -286,7 +288,7 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
       case BREATHING: {
         static uint8_t breathVal = 0;
         static bool breathDir = true;
-        CRGB breathColor = currentColor;
+        CRGB breathColor = Breathing_Color;
         breathColor.fadeLightBy(255 - breathVal);
         fill_solid(led, LED_COUNT[LEDlabel], breathColor);
         if (breathDir) {
@@ -310,6 +312,9 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
         break;
       case SCREEN:
         fill_solid(led, LED_COUNT[LEDlabel], SCREEN_Color); 
+        break;
+      case GRADIENT:
+        fill_solid(led, LED_COUNT[LEDlabel], Breathing_Color);
         break;
     }
     xSemaphoreGive(ledMutex); 
@@ -350,15 +355,27 @@ void WIFI_Task(void *pvParameters)
   xTaskCreate(Server_Task, "Server_Task", 4096*2, NULL, 1, NULL);
   vTaskDelete(NULL);
 }
-
+float offset = 0;
 void updateLEDs() 
 {
+  
   static unsigned long lastUpdate = 0;
   unsigned long now = millis();
-  static uint8_t offset = 0;
-  if (now - lastUpdate < map(speed, 0, 100, 50, 5)) {
+    if (now - lastUpdate < map(speed, 0, 100, 50, 5)) {
     return;
-  }
+   }
+   if(LED_Mode[1]==GRADIENT || LED_Mode[2]==GRADIENT || 
+     LED_Mode[3]==GRADIENT || LED_Mode[4]==GRADIENT || 
+     LED_Mode[5]==GRADIENT || LED_Mode[6]==GRADIENT || 
+     LED_Mode[7]==GRADIENT || LED_Mode[8]==GRADIENT ||
+     LED_Mode[1]==BREATHING || LED_Mode[2]==BREATHING || 
+     LED_Mode[3]==BREATHING || LED_Mode[4]==BREATHING ||    
+     LED_Mode[5]==BREATHING || LED_Mode[6]==BREATHING || 
+     LED_Mode[7]==BREATHING || LED_Mode[8]==BREATHING )
+    {
+        Breathing_Color = CRGB((sin(offset)+1)*127,(sin(offset+PI*2/3)+1)*127,(sin(offset+PI*4/3)+1)*127);
+        offset+=0.01;
+    }
 /*  >>>>>>>>>使用了WebSocket通信，串口通信弃用但函数保留<<<<<<<<<<<<   */
 //   if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || 
 //      LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || 

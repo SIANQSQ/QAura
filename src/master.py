@@ -20,7 +20,7 @@ import json
 import comtypes
 import warnings
 LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","---","---","---"]
-modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5)]
+modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5),("渐变",6)]
 WS2812B_Pin = [4,18,19,21,22,23,25,26]
 LED_Num = [53,22,28,39,33,0,0,0]
 
@@ -30,7 +30,7 @@ class MultiChannelLEDControlApp:
         self.master = master
         master.title("QAura Master")
         master.geometry("1000x1000")
-        #self.master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+        self.master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
         self.master.iconbitmap('icon.ico')
         # 托盘相关变量
         self.tray = None
