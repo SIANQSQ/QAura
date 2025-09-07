@@ -10,14 +10,15 @@ import winreg
 import pyautogui
 import serial
 import serial.tools.list_ports
-from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IPropertyStore
 from comtypes import CLSCTX_ALL
 from ctypes import cast, POINTER
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw
 import json
-
+import comtypes
+import warnings
 LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","---","---","---"]
 modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5)]
 WS2812B_Pin = [4,18,19,21,22,23,25,26]
@@ -62,6 +63,7 @@ class MultiChannelLEDControlApp:
         self.audio_running = False
         self.speed_frame = None
         self.peak = 0   # 音频峰值
+        self.audio_device_name = None
         #屏幕捕获模式参数
         self.screen_x = tk.IntVar(value=100)
         self.screen_y = tk.IntVar(value=100)
@@ -703,16 +705,19 @@ class MultiChannelLEDControlApp:
             try:
                 self.ws = websocket.create_connection(f"ws://{self.esp_ip.get()}:81")
                 while self.ws_running:
-                    if self.audio_use_specific_color.get():
+                    if self.audio_use_specific_color.get() == True:
                         useSpecific = 1
                     else:    
                         useSpecific = 0
                     rgb_data = {
-                    "type": "serial_pack",
-                    "specific_color": useSpecific,
+                    "type": "AC_pack",
+                    "specific_color": int(useSpecific),
                     "r": int(self.screen_r),
                     "g": int(self.screen_g),
                     "b": int(self.screen_b),
+                    "a_r": int(self.audio_r),
+                    "a_g": int(self.audio_g),  
+                    "a_b": int(self.audio_b),
                     "peak": self.peak
                     }
         
@@ -905,27 +910,49 @@ class MultiChannelLEDControlApp:
     def stop_screen_thread(self):
         self.status_bar.config(text=f"成功停止屏幕颜色捕获线程")
         self.screen_running = False
+    
+    def get_friendly_name(self, dev) -> str:
+        with warnings.catch_warnings():
+            # suppress deprecation warning for GetAllDevices
+            warnings.simplefilter("ignore", UserWarning)
 
+            # get the unique endpoint ID
+            dev_id = dev.GetId()
+
+            # AudioUtilities.GetAllDevices() yields AudioDevice wrappers
+            for d in AudioUtilities.GetAllDevices():
+                if d.id == dev_id:
+                    return d.FriendlyName
+            return "Unknown Device"
+
+    def set_meter(self):
+        try:
+            devices = AudioUtilities.GetSpeakers()
+            self.audio_device_name = self.get_friendly_name(devices)
+            interface = devices.Activate(
+                            IAudioMeterInformation._iid_, 
+                            CLSCTX_ALL, 
+                            None
+                        )
+            self.status_bar.config(text=f"音频监听设备已切换为: {self.audio_device_name}")
+            self.meter = cast(interface, POINTER(IAudioMeterInformation))  # 重新初始化音频设备
+            
+        except Exception as e:
+            self.status_bar.config(text=f"音频初始化错误: {e},请检查音频设备")
+            self.log_diagnostic(f"音频初始化错误: {e}")
     def start_audio_thread(self):
         self.status_bar.config(text=f"正在启动音频监听线程")
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(
-            IAudioMeterInformation._iid_, 
-            CLSCTX_ALL, 
-            None
-        )
-        self.meter = cast(interface, POINTER(IAudioMeterInformation))
-
+        self.set_meter()
         def audio_worker():
             self.audio_running = True
-            self.status_bar.config(text=f"成功启动音频监听线程")
+            self.status_bar.config(text=f"成功启动音频监听线程,监听设备: {self.audio_device_name}")
 
             # 视觉效果增强参数
             peak_hold = 0.0  # 用于峰值保持效果
             peak_decay = 0.95  # 峰值衰减速率 (值越小衰减越快)
             min_threshold = 0.02  # 最小阈值，过滤微小声音
             response_curve = 1.5  # 响应曲线指数，值越大对强信号越敏感
-
+            comtypes.CoInitialize()
             while self.audio_running:
                 try:
                     try:
@@ -951,20 +978,12 @@ class MultiChannelLEDControlApp:
 
                     final_peak = round(min(peak_hold, 0.999), 5)
                     self.peak = final_peak
-                    # 发送控制命令
-                    # if self.audio_use_specific_color.get():
-                    #     self.send_audio_command(2, self.audio_r, self.audio_g, self.audio_b, final_peak)
-                    # elif any(self.channels[i]["mode"] == 5 for i in range(8)):
-                    #     self.send_audio_command(2, self.r_avg, self.g_avg, self.b_avg, final_peak)
-                    # else:
-                    #     self.send_audio_command(2, -1, -1, -1, final_peak)
-
-                    #self.log_diagnostic(f"音频峰值: {final_peak}")
 
                 except Exception as e:
                     self.status_bar.config(text=f"音频线程错误: {e},请尝试重新切换至音频模式")
-
-                time.sleep(1/60)  
+                    if "设备已被删除" in str(e):
+                        self.set_meter()
+                time.sleep(1/60)  # 60Hz更新频率
 
         self.audio_thread = threading.Thread(target=audio_worker, daemon=True)
         self.audio_thread.start()

@@ -19,11 +19,11 @@
 
 #define PORT        80      // HTTP端口
 #define PORT_WS     81      // WebSocket端口
-#define LED1_COUNT 53  //桌子下
-#define LED2_COUNT 22  //显示器下
-#define LED3_COUNT 28  //显示器上
-#define LED4_COUNT 39  //桌子上  
-#define LED5_COUNT 23  //桌子侧面
+#define LED1_COUNT 53    //桌子下
+#define LED2_COUNT 22    //显示器下
+#define LED3_COUNT 28    //显示器上
+#define LED4_COUNT 39    //桌子上  
+#define LED5_COUNT 23    //桌子侧面
 #define LED6_COUNT 0
 #define LED7_COUNT 0
 #define LED8_COUNT 0
@@ -31,12 +31,6 @@ uint16_t LED_COUNT[9] = {0,LED1_COUNT,LED2_COUNT,LED3_COUNT,LED4_COUNT,LED5_COUN
 int8_t LED_DeltaHUE[9] = {0,1,-1,1,1,1,1,1,1}; //色相变化步长，用于设置彩虹流动方向
 
 CRGB LED_Color[9] = {CRGB::Black,CRGB::Red,CRGB::Green,CRGB::Blue,CRGB::White,CRGB::Yellow,CRGB::Cyan,CRGB::Purple,CRGB::Orange}; //各灯带默认静态颜色
-// 定义连接到MAX9812输出的ADC引脚
-#define MAX9812_OUTPUT_PIN 34  // ESP32的ADC1_CH6引脚
-
-// 采样参数
-#define SAMPLE_RATE 1000       // 采样率(Hz)
-#define SAMPLES_PER_READ 10    // 每次读取的样本数
 
 SemaphoreHandle_t ledMutex; 
 
@@ -97,8 +91,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         Serial.printf("[%u] 客户端已连接: %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
         clientConnected = true;
         clientNum = num;
-        
-        // 发送欢迎消息
+
         String welcomeMsg = "{\"type\":\"welcome\",\"message\":\"Connected to QAura WebSocket server\"}";
         webSocket.sendTXT(num, welcomeMsg);
       }
@@ -106,7 +99,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       
     case WStype_TEXT:
       {
-        // 将接收到的数据转换为字符串
         String jsonString = String((char*)payload);
         //Serial.printf("[%u] 接收到 JSON 数据: %s\n", num, jsonString.c_str());
         
@@ -126,35 +118,35 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
 
 // 处理 JSON 数据
 void processJsonData(uint8_t client_num, String jsonString) {
-  // 创建 JSON 文档
   DynamicJsonDocument doc(1024);
   DeserializationError error = deserializeJson(doc, jsonString);
-  
-  // 检查解析错误
   if (error) {
     Serial.print("JSON 解析错误: ");
     Serial.println(error.c_str());
-    
-    // 发送错误响应
     String errorResponse = "{\"type\":\"error\",\"message\":\"Invalid JSON format\"}";
     webSocket.sendTXT(client_num, errorResponse);
     return;
   }
   
-  // 获取 JSON 类型
   String type = doc["type"].as<String>();
   
-  // 根据类型处理不同的请求
-  if (type == "serial_pack") {
-    // 处理命令请求
-    int specific_color = doc["value"].as<int>();
+  if (type == "AC_pack") {     //Audio and Screen Pack
+    // 处理数据
+    int specific_color = doc["specific_color"].as<int>();
     int r = doc["r"].as<int>();
     int g = doc["g"].as<int>();
     int b = doc["b"].as<int>();
+    int a_r = doc["a_r"].as<int>();  //Audio模式下特定的颜色
+    int a_g = doc["a_g"].as<int>();
+    int a_b = doc["a_b"].as<int>();
     float rec_peak = doc["peak"].as<float>();
     Peak = rec_peak;
     SCREEN_Color = CRGB(r, g, b);
-    Use_Audio_Specific_Color = (specific_color == 1);
+    AUDIO_Color = CRGB(a_r, a_g, a_b);
+    if (specific_color == 1)
+        Use_Audio_Specific_Color = true;
+    else
+        Use_Audio_Specific_Color = false;
     Serial.printf("Received serial_pack: specific_color=%d, r=%d, g=%d, b=%d, peak=%f\n", specific_color, r, g, b, Peak);
 }
 }
@@ -367,6 +359,7 @@ void updateLEDs()
   if (now - lastUpdate < map(speed, 0, 100, 50, 5)) {
     return;
   }
+/*  >>>>>>>>>使用了WebSocket通信，串口通信弃用但函数保留<<<<<<<<<<<<   */
 //   if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || 
 //      LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || 
 //      LED_Mode[5]==SCREEN || LED_Mode[6]==SCREEN || 
@@ -377,7 +370,7 @@ void updateLEDs()
 //      LED_Mode[7]==VOLUM_MAP || LED_Mode[8]==VOLUM_MAP )
 //   {
 //     parseSerialCommand();
-//   }
+//   } 
   lastUpdate = now;
   updateLED(LED1,1);
   updateLED(LED2,2);
@@ -479,13 +472,11 @@ void LED_Task(void *pvParameters) {
 }
 void setup() {
   Serial.begin(115200);
-
   Serial.println("QAura 启动中...");
   ledMutex = xSemaphoreCreateMutex();
   if (ledMutex == NULL) {
     Serial.println("互斥锁创建失败！系统可能内存不足");
   }
-
   FastLED.addLeds<WS2812B, LED1_PIN, GRB>(LED1, LED1_COUNT);
   FastLED.addLeds<WS2812B, LED2_PIN, GRB>(LED2, LED2_COUNT);
   FastLED.addLeds<WS2812B, LED3_PIN, GRB>(LED3, LED3_COUNT);
@@ -496,21 +487,8 @@ void setup() {
   FastLED.addLeds<WS2812B, LED8_PIN, GRB>(LED8, LED8_COUNT);
   FastLED.setBrightness(brightness);
   FastLED.show();
-  
-
-
-  // 设置HTTP路由
- 
-
-  //   analogSetAttenuation(ADC_11db);  // 设置衰减
-  //   analogSetWidth(12);              // 设置ADC分辨率为12位
-  
-  // Serial.print("采样率: ");
-  // Serial.print(SAMPLE_RATE);
-  // Serial.println(" Hz");
   bootEffect();
   xTaskCreatePinnedToCore(WIFI_Task, "WIFI_Task", 4096, NULL, 1, NULL, 0);
-  
   xTaskCreatePinnedToCore(LED_Task, "LED_Task", 4096, NULL, 1, NULL, 0);
 }
 
@@ -518,9 +496,6 @@ void setup() {
 
 void loop() 
 {  
-  //server.handleClient();
-  //updateLEDs();
-  
 }
 
  
