@@ -10,17 +10,19 @@ import winreg
 import pyautogui
 import serial
 import serial.tools.list_ports
-from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IPropertyStore
 from comtypes import CLSCTX_ALL
 from ctypes import cast, POINTER
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw
-
-LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","---","---","---"]
-modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5)]
+import json
+import comtypes
+import warnings
+LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","柜子上","---","---"]
+modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5),("渐变",6)]
 WS2812B_Pin = [4,18,19,21,22,23,25,26]
-LED_Num = [53,22,28,39,33,0,0,0]
+LED_Num = [53,22,28,39,33,40,0,0]
 
 
 class MultiChannelLEDControlApp:
@@ -45,7 +47,7 @@ class MultiChannelLEDControlApp:
         # 通道配置
         self.channels = []  # 存储每个通道的状态
         self.mode_combos = []  # 存储每个通道的模式下拉框
-        self.esp_ip = tk.StringVar(value="192.168.31.205")  # 默认IP
+        self.esp_ip = tk.StringVar(value="192.168.31.105")  # 默认IP
         self.connection_status = tk.BooleanVar(value=False)
         self.last_known_ip = ""
         self.color_previews = []
@@ -53,16 +55,22 @@ class MultiChannelLEDControlApp:
         self.ColorSystemTheme = tk.BooleanVar()  # 使用系统主题颜色
         #音频模式参数
         self.audio_color_preview = None
-        self.audio_use_specific_color = tk.BooleanVar(value=False)
+        self.others_use_specific_color = tk.BooleanVar(value=False)
         self.audio_r = 128  #默认声音模式特定颜色
         self.audio_g = 128
         self.audio_b = 128
         self.audio_gain = tk.DoubleVar(value=1.0) #增益
+        self.audio_running = False
         self.speed_frame = None
-
+        self.peak = 0   # 音频峰值
+        self.audio_device_name = None
         #屏幕捕获模式参数
         self.screen_x = tk.IntVar(value=100)
         self.screen_y = tk.IntVar(value=100)
+        self.screen_r = 0
+        self.screen_g = 0
+        self.screen_b = 0
+        self.screen_running = False
         self.ws = None
         self.ws_running = False
         self.ws_thread = None
@@ -70,7 +78,6 @@ class MultiChannelLEDControlApp:
         self.serial_port = None
         self.serial_connected = tk.BooleanVar(value=False)
         self.serial_port_name = tk.StringVar()
-        self.serial_running = False
         self.serial_thread = None
 
         self.region_size = tk.IntVar(value=10)  # 监测区域大小
@@ -180,7 +187,7 @@ class MultiChannelLEDControlApp:
         speed.set(50)
         speed.pack(side=tk.LEFT, padx=5)
 
-        audio_specify_color_check = tk.Checkbutton(self.speed_frame, text="音频模式下使用特定颜色", variable=self.audio_use_specific_color)
+        audio_specify_color_check = tk.Checkbutton(self.speed_frame, text="其他模式下使用特定颜色", variable=self.others_use_specific_color, command=self.use_specific_color_function)
         audio_specify_color_check.pack(side=tk.LEFT, padx=5)
         ttk.Label(self.speed_frame, text="颜色:").pack(side=tk.LEFT)
 
@@ -490,19 +497,7 @@ class MultiChannelLEDControlApp:
         # if not self.connection_status.get():
         #     self.test_connection()
         #     return
-        if(mode_id == 5):
-            #self.start_websocket_thread()
-            self.start_screen_serial_thread()
-        else:
-            #self.stop_websocket_thread()
-            self.stop_screen_serial_thread()
-        if(mode_id == 4):
-            #self.start_websocket_thread()
-            self.start_audio_serial_thread()
-        else:
-            #self.stop_websocket_thread()
-            self.stop_audio_serial_thread()
-
+        
         if self.ColorSYNC.get():
             requests.get(
                         f"http://{self.esp_ip.get()}/set_mode",
@@ -519,25 +514,57 @@ class MultiChannelLEDControlApp:
                     self.mode_combos[i].set(modes[mode_id][0])
                 except Exception as e:
                     self.status_bar.config(text=f"错误: {str(e)}")
-            #self.status_bar.config(text="所有通道已同步")
+            self.log_diagnostic(f"设置所有通道  模式: [ {modes[mode_id][0]} ]")
+            self.status_bar.config(text=f"全部通道模式设置成功")
             #self.log_diagnostic("同步所有通道")
-            return
-        try:
-            response = requests.get(
-                f"http://{self.esp_ip.get()}/set_mode", 
-                params={
-                    "channel": channel+1,
-                    "mode": mode_id
-                },
-                timeout=2
-            )
-            self.status_bar.config(text=f"通道 {channel+1} 模式设置成功")
-            self.log_diagnostic(f"设置通道 {channel+1} 模式: {mode_id}")
-            
-            # 更新本地状态
-            self.channels[channel]["mode"] = mode_id
-        except Exception as e:
-            self.status_bar.config(text=f"错误: {str(e)}")
+        else:
+            try:
+                response = requests.get(
+                    f"http://{self.esp_ip.get()}/set_mode", 
+                    params={
+                        "channel": channel+1,
+                        "mode": mode_id
+                    },
+                    timeout=2
+                )
+                self.status_bar.config(text=f"通道 {channel+1} 模式设置成功")
+                self.log_diagnostic(f"设置通道 {channel+1} 模式: [ {modes[mode_id][0]} ]")
+                
+                # 更新本地状态
+                self.channels[channel]["mode"] = mode_id
+            except Exception as e:
+                self.status_bar.config(text=f"错误: {str(e)}")
+
+        # 根据模式启动或停止相关线程
+        OnSCREEN = False
+        OnAUDIO = False
+        if(mode_id == 5):
+            OnSCREEN = True
+            if not self.screen_running:
+                self.start_screen_thread()
+            if not self.ws_running:
+                self.start_websocket_thread()
+        else:
+            for i in range(8):  
+                print
+                if int(self.channels[i]["mode"]) == 5:
+                    OnSCREEN = True
+            if not OnSCREEN :
+                self.stop_screen_thread()
+        if(mode_id == 4):
+            OnAUDIO = True
+            if not self.audio_running:
+                self.start_audio_thread()
+            if not self.ws_running:
+                self.start_websocket_thread()
+        else:
+            for i in range(8):  
+                if int(self.channels[i]["mode"]) == 4:
+                    OnAUDIO = True
+            if not OnAUDIO :
+                self.stop_audio_thread()
+        if not OnSCREEN and not OnAUDIO:
+            self.stop_websocket_thread()
     
     def choose_audio_color(self):
         if not self.connection_status.get():
@@ -672,24 +699,42 @@ class MultiChannelLEDControlApp:
                 print(f"Error accessing registry: {e}")
                 return None
     
+    def use_specific_color_function(self):
+        if self.ws_running:
+            return
+        else:
+            self.start_websocket_thread()
     def start_websocket_thread(self):
         """启动WebSocket线程，定时发送屏幕颜色"""
         def ws_worker():
             self.ws_running = True
             try:
-                self.ws = websocket.create_connection(f"ws://{self.esp_ip.get()}:8111/ws")
+                self.ws = websocket.create_connection(f"ws://{self.esp_ip.get()}:81")
                 while self.ws_running:
-                    x = self.screen_x.get()
-                    y = self.screen_y.get()
-                    # 获取屏幕颜色
-                    color = pyautogui.pixel(x, y)
-                    r, g, b = color
-                    msg = f"{r},{g},{b}"  
-                    print(r)
-                    self.ws.send(msg)
-                    time.sleep(1/5)  # 30HZ
+                    if self.others_use_specific_color.get() == True:
+                        useSpecific = 1
+                    else:    
+                        useSpecific = 0
+                    rgb_data = {
+                    "type": "AC_pack",
+                    "specific_color": int(useSpecific),
+                    "r": int(self.screen_r),
+                    "g": int(self.screen_g),
+                    "b": int(self.screen_b),
+                    "a_r": int(self.audio_r),
+                    "a_g": int(self.audio_g),  
+                    "a_b": int(self.audio_b),
+                    "peak": self.peak
+                    }
+        
+                    # 将字典转换为JSON字符串并发送
+                    json_data = json.dumps(rgb_data)
+                    self.ws.send(json_data)
+                    time.sleep(1/30)  # 30hz
             except Exception as e:
-                print(f"WebSocket错误: {e}")
+                self.log_diagnostic(f"WebSocket错误: {e}")
+                self.log_diagnostic(f"已切换所有模式为 [ 彩虹 ]")
+                self.set_mode(-1,2)
             finally:
                 if self.ws:
                     self.ws.close()
@@ -697,7 +742,8 @@ class MultiChannelLEDControlApp:
         self.ws_thread.start()
 
     def stop_websocket_thread(self):
-        print("Stopping WebSocket thread")
+        if self.others_use_specific_color.get() == True:
+            return
         self.ws_running = False
         if self.ws:
             self.ws.close()
@@ -733,7 +779,7 @@ class MultiChannelLEDControlApp:
                 self.log_diagnostic(f"串口断开失败: {str(e)}")
         else:
             self.serial_status_label.config(text="未连接")
-    def send_command(self, mode, r, g, b, peak):
+    def send_command(self, mode, r, g, b, peak):       #串口通信所用函数，现已弃用
         """
         发送模式和数据到ESP32，带颜色平滑过渡
         """
@@ -760,7 +806,9 @@ class MultiChannelLEDControlApp:
 
             # 构建命令字符串
             command = f"{mode},{current_r},{current_g},{current_b},{peak}\n"
-
+            self.screen_r = current_r
+            self.screen_g = current_g   
+            self.screen_b = current_b
             try:
                 # 发送命令
                 if self.serial_port and self.serial_port.is_open:
@@ -789,13 +837,13 @@ class MultiChannelLEDControlApp:
             self.status_bar.config(text=f"串口发送错误: {e}")
             #print(f"发送命令时出错: {e}")
             
-    def start_screen_serial_thread(self):
+    def start_screen_thread(self):
         """启动串口线程，定时发送屏幕颜色"""
         self.status_bar.config(text=f"正在启动屏幕颜色捕获线程")
-        def screen_serial_worker():
-            self.serial_running = True
+        def screen_worker():
+            self.screen_running = True
             self.status_bar.config(text=f"成功启动屏幕颜色捕获线程")
-            while self.serial_running:
+            while self.screen_running:
                 x = self.screen_x.get()
                 y = self.screen_y.get()
                 try:
@@ -831,44 +879,89 @@ class MultiChannelLEDControlApp:
                         g_total += g
                         b_total += b
 
-                r_avg = r_total // pixel_count
-                g_avg = g_total // pixel_count
-                b_avg = b_total // pixel_count
+                self.screen_r = r_total // pixel_count
+                self.screen_g = g_total // pixel_count
+                self.screen_b = b_total // pixel_count
 
-                self.send_command(1, r_avg, g_avg, b_avg, 0)
-                # if self.serial_port.in_waiting:
-                #     response = self.serial_port.readline().decode('utf-8').strip()
-                #     print(f"ESP32响应: {response}")
-                time.sleep(1/30)  # 30Hz
+                if not hasattr(self, 'last_r'):
+                    self.last_r, self.last_g, self.last_b = self.screen_r, self.screen_g, self.screen_b
 
-        self.serial_thread = threading.Thread(target=screen_serial_worker, daemon=True)
-        self.serial_thread.start()
-
-
-    def stop_screen_serial_thread(self):
-        self.status_bar.config(text=f"成功停止屏幕颜色捕获线程")
-        self.serial_running = False
+                # 计算颜色差值
+                diff_r = r - self.last_r
+                diff_g = g - self.last_g
+                diff_b = b - self.last_b
         
-    def start_audio_serial_thread(self):
+                # 设置过渡步数
+                steps = 20
+        
+                # 逐步过渡颜色
+                for i in range(1, steps + 1):
+                    if not self.screen_running:  # 如果中途停止，则退出
+                        break
+        
+                    # 计算当前步的颜色
+                    current_r = self.last_r + int(diff_r * i / steps)
+                    current_g = self.last_g + int(diff_g * i / steps)
+                    current_b = self.last_b + int(diff_b * i / steps)
+        
+                    self.screen_r = current_r
+                    self.screen_g = current_g   
+                    self.screen_b = current_b
+                    
+                    time.sleep(0.001)  # 短暂延迟，控制过渡速度
+
+                self.last_r, self.last_g, self.last_b = self.screen_r, self.screen_g, self.screen_b
+                time.sleep(0.01)
+        self.serial_thread = threading.Thread(target=screen_worker, daemon=True)
+        self.serial_thread.start()
+       
+
+    def stop_screen_thread(self):
+        self.status_bar.config(text=f"成功停止屏幕颜色捕获线程")
+        self.screen_running = False
+    
+    def get_friendly_name(self, dev) -> str:
+        with warnings.catch_warnings():
+            # suppress deprecation warning for GetAllDevices
+            warnings.simplefilter("ignore", UserWarning)
+
+            # get the unique endpoint ID
+            dev_id = dev.GetId()
+
+            # AudioUtilities.GetAllDevices() yields AudioDevice wrappers
+            for d in AudioUtilities.GetAllDevices():
+                if d.id == dev_id:
+                    return d.FriendlyName
+            return "Unknown Device"
+
+    def set_meter(self):
+        try:
+            devices = AudioUtilities.GetSpeakers()
+            self.audio_device_name = self.get_friendly_name(devices)
+            interface = devices.Activate(
+                            IAudioMeterInformation._iid_, 
+                            CLSCTX_ALL, 
+                            None
+                        )
+            self.status_bar.config(text=f"音频监听设备已切换为: {self.audio_device_name}")
+            self.meter = cast(interface, POINTER(IAudioMeterInformation))  # 重新初始化音频设备
+            
+        except Exception as e:
+            self.status_bar.config(text=f"音频初始化错误: {e},请检查音频设备")
+            self.log_diagnostic(f"音频初始化错误: {e}")
+    def start_audio_thread(self):
         self.status_bar.config(text=f"正在启动音频监听线程")
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(
-            IAudioMeterInformation._iid_, 
-            CLSCTX_ALL, 
-            None
-        )
-        self.meter = cast(interface, POINTER(IAudioMeterInformation))
-
-        def audio_serial_worker():
+        self.set_meter()
+        def audio_worker():
             self.audio_running = True
-            self.status_bar.config(text=f"成功启动音频监听线程")
-
+            self.status_bar.config(text=f"成功启动音频监听线程,监听设备: {self.audio_device_name}")
+            self.log_diagnostic(f"成功启动音频监听线程,监听设备: {self.audio_device_name}")
             # 视觉效果增强参数
             peak_hold = 0.0  # 用于峰值保持效果
             peak_decay = 0.95  # 峰值衰减速率 (值越小衰减越快)
             min_threshold = 0.02  # 最小阈值，过滤微小声音
             response_curve = 1.5  # 响应曲线指数，值越大对强信号越敏感
-
+            comtypes.CoInitialize()
             while self.audio_running:
                 try:
                     try:
@@ -893,24 +986,18 @@ class MultiChannelLEDControlApp:
                         peak_hold = 0.0
 
                     final_peak = round(min(peak_hold, 0.999), 5)
-
-                    # 发送控制命令
-                    if self.audio_use_specific_color.get():
-                        self.send_audio_command(2, self.audio_r, self.audio_g, self.audio_b, final_peak)
-                    else:
-                        self.send_audio_command(2, -1, -1, -1, final_peak)
-
-                    #self.log_diagnostic(f"音频峰值: {final_peak}")
+                    self.peak = final_peak
 
                 except Exception as e:
                     self.status_bar.config(text=f"音频线程错误: {e},请尝试重新切换至音频模式")
+                    if "设备已被删除" in str(e):
+                        self.set_meter()
+                time.sleep(1/60)  # 60Hz更新频率
 
-                time.sleep(1/60)  
-
-        self.audio_thread = threading.Thread(target=audio_serial_worker, daemon=True)
+        self.audio_thread = threading.Thread(target=audio_worker, daemon=True)
         self.audio_thread.start()
 
-    def stop_audio_serial_thread(self):
+    def stop_audio_thread(self):
         self.status_bar.config(text=f"成功停止音频监听线程")
         # print("Stopping audio thread")
         self.audio_running = False
@@ -983,15 +1070,6 @@ class MultiChannelLEDControlApp:
     def stray_static_color(self, icon=None, item=None):
         self.set_mode(-1, 1)
 
-    def stray_rainbow(self, icon=None, item=None):
-        self.set_mode(-1, 2)
-    
-    def stray_rainbow(self, icon=None, item=None):
-        self.set_mode(-1, 2)
-
-    def stray_rainbow(self, icon=None, item=None):
-        self.set_mode(-1, 2)
-    
     def stray_rainbow(self, icon=None, item=None):
         self.set_mode(-1, 2)
     

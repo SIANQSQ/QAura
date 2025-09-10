@@ -24,7 +24,7 @@
 #define LED3_COUNT 28    //显示器上
 #define LED4_COUNT 39    //桌子上  
 #define LED5_COUNT 23    //桌子侧面
-#define LED6_COUNT 0
+#define LED6_COUNT 40    //柜子上
 #define LED7_COUNT 0
 #define LED8_COUNT 0
 uint16_t LED_COUNT[9] = {0,LED1_COUNT,LED2_COUNT,LED3_COUNT,LED4_COUNT,LED5_COUNT,LED6_COUNT,LED7_COUNT,LED8_COUNT};
@@ -64,7 +64,7 @@ enum LightMode {
 LightMode currentMode = VOLUM_MAP;
 CRGB Breathing_Color = CRGB::White; // 默认白色
 CRGB SCREEN_Color = CRGB::Black;
-CRGB AUDIO_Color = CRGB::Black;
+CRGB SPECIFIC_Color = CRGB::Black;
 uint8_t brightness = 100;        // 默认亮度
 uint8_t speed = 50;              // 默认速度
 uint8_t hue[9] = {0};                 // 色相值
@@ -74,7 +74,7 @@ LightMode LED_Mode[9] = {OFF,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAINBOW,RAI
 //LightMode LED_Mode[9] = {OFF,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT,GRADIENT};
 uint16_t MIDLED[9]={0,1+LED1_COUNT/2,1+LED2_COUNT/2,1+LED3_COUNT/2,1+LED4_COUNT/2,1+LED5_COUNT/2,1+LED6_COUNT/2,1+LED7_COUNT/2,1+LED8_COUNT/2};
 float Peak = 0.0;  // 记录当前音量峰值
-bool Use_Audio_Specific_Color = false;
+bool Others_Use_Specific_Color = false;
 void updateLEDs();
 
 bool clientConnected = false;
@@ -144,12 +144,12 @@ void processJsonData(uint8_t client_num, String jsonString) {
     float rec_peak = doc["peak"].as<float>();
     Peak = rec_peak;
     SCREEN_Color = CRGB(r, g, b);
-    AUDIO_Color = CRGB(a_r, a_g, a_b);
+    SPECIFIC_Color = CRGB(a_r, a_g, a_b);
     if (specific_color == 1)
-        Use_Audio_Specific_Color = true;
+        Others_Use_Specific_Color = true;
     else
-        Use_Audio_Specific_Color = false;
-    Serial.printf("Received serial_pack: specific_color=%d, r=%d, g=%d, b=%d, peak=%f\n", specific_color, r, g, b, Peak);
+        Others_Use_Specific_Color = false;
+    //Serial.printf("Received serial_pack: specific_color=%d, r=%d, g=%d, b=%d, peak=%f\n", specific_color, r, g, b, Peak);
 }
 }
 
@@ -171,12 +171,12 @@ void parseSerialCommand() {
       {
         if(r != -1 && g != -1 && b != -1) // 如果r, g, b不是-1，则更新currentColor
         {
-          AUDIO_Color = CRGB(r, g, b);
-          Use_Audio_Specific_Color = true;
+          SPECIFIC_Color = CRGB(r, g, b);
+          Others_Use_Specific_Color = true;
         }   
         else
         {
-          Use_Audio_Specific_Color = false;
+          Others_Use_Specific_Color = false;
         }
         if(peak<=0.0){peak = 0.0;}
         else if(peak>=1.0)peak = 1.0;
@@ -288,7 +288,9 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
       case BREATHING: {
         static uint8_t breathVal = 0;
         static bool breathDir = true;
-        CRGB breathColor = Breathing_Color;
+        CRGB breathColor;
+        if(Others_Use_Specific_Color){breathColor = SPECIFIC_Color;Serial.print("Using specific color");}
+        else{breathColor = Breathing_Color;Serial.print("Using gradient color");}
         breathColor.fadeLightBy(255 - breathVal);
         fill_solid(led, LED_COUNT[LEDlabel], breathColor);
         if (breathDir) {
@@ -302,7 +304,7 @@ void updateLED(CRGB* led, uint8_t LEDlabel) {
       }
       case VOLUM_MAP:
         fill_solid(led, LED_COUNT[LEDlabel], CRGB::Black);
-        if(Use_Audio_Specific_Color){fill_solid(led, floor(Peak*(LED_COUNT[LEDlabel]-1)), AUDIO_Color);}
+        if(Others_Use_Specific_Color){fill_solid(led, floor(Peak*(LED_COUNT[LEDlabel]-1)), SPECIFIC_Color);}
         else if(LED_Mode[1]==SCREEN || LED_Mode[2]==SCREEN || 
                 LED_Mode[3]==SCREEN || LED_Mode[4]==SCREEN || 
                 LED_Mode[5]==SCREEN || LED_Mode[6]==SCREEN || 
