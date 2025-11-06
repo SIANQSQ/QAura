@@ -1001,12 +1001,12 @@ class MultiChannelLEDControlApp:
                         max_peak = float(max(self.audio_peak_queue))
                         min_peak = float(min(self.audio_peak_queue))
                         if(min_peak>0.7 and len(self.audio_peak_queue)>=250):
-                            self.audio_gain.set(round(float(self.audio_gain.get())/max_peak,2))
+                            self.audio_gain.set(round(float(self.audio_gain.get())/max_peak,4))
                             self.audio_peak_queue.clear()
                             #print(round(float(self.audio_gain.get())/max_peak,2))
                             self.log_diagnostic(f"音频峰值过高，自动降低增益为: {self.audio_gain.get()}")
                         elif(max_peak<0.5 and max_peak>0.01 and len(self.audio_peak_queue)>=250):
-                            self.audio_gain.set(round(float(self.audio_gain.get())/(max_peak),2))
+                            self.audio_gain.set(round(float(self.audio_gain.get())/(max_peak),4))
                             self.audio_peak_queue.clear()
                             self.log_diagnostic(f"音频峰值过低，自动提高增益为: {self.audio_gain.get()}")
 
