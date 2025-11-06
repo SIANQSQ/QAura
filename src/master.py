@@ -1045,6 +1045,7 @@ class MultiChannelLEDControlApp:
                 item('呼吸', self.stray_breathing),
                 item('音频', self.stray_audio),
                 item('屏幕', self.stray_screen),
+                item('渐变',self.stray_gradient),
                 item('退出', self.exit_app)
             )
             
@@ -1109,6 +1110,9 @@ class MultiChannelLEDControlApp:
 
     def stray_screen(self, icon=None, item=None):
         self.set_mode(-1, 5)
+    
+    def stray_gradient(self, icon=None, item=None):
+        self.set_mode(-1, 6)
     
     
 if __name__ == "__main__":
