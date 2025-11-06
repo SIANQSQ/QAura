@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw
 import json
 import comtypes
 import warnings
+from collections import deque
 LED_Name = ["桌子下","显示器下","显示器上","桌子上","桌子侧","柜子上","---","---"]
 modes = [("关闭", 0), ("纯色", 1), ("彩虹", 2), ("呼吸", 3), ("声音", 4), ("屏幕", 5),("渐变",6)]
 WS2812B_Pin = [4,18,19,21,22,23,25,26]
@@ -29,7 +30,8 @@ class MultiChannelLEDControlApp:
     def __init__(self, master):
         self.master = master
         master.title("QAura Master")
-        master.geometry("1000x1000")
+        master.geometry("1070x1000")
+        master.withdraw()
         self.master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
         self.master.iconbitmap('icon.ico')
         # 托盘相关变量
@@ -64,6 +66,8 @@ class MultiChannelLEDControlApp:
         self.speed_frame = None
         self.peak = 0   # 音频峰值
         self.audio_device_name = None
+        self.audio_peak_queue = deque(maxlen=300)  # 存储最近300个峰值数据（5秒）
+        self.audio_Dynamic_Peak = tk.BooleanVar(value=True)  #动态峰值开关
         #屏幕捕获模式参数
         self.screen_x = tk.IntVar(value=100)
         self.screen_y = tk.IntVar(value=100)
@@ -88,6 +92,8 @@ class MultiChannelLEDControlApp:
         self.monitor_connection()
         
         self.create_tray_icon()
+
+        self.minimize_to_tray()
     def create_widgets(self):
         # 主框架
         main_frame = ttk.Frame(self.master)
@@ -147,7 +153,7 @@ class MultiChannelLEDControlApp:
         x_entry = ttk.Entry(check_frame, textvariable=self.screen_x, width=6)
         x_entry.pack(side=tk.LEFT, padx=2)
         ttk.Label(check_frame, text="Y:").pack(side=tk.LEFT, padx=2)
-        self.screen_y = tk.IntVar(value=1200)
+        self.screen_y = tk.IntVar(value=800)
         y_entry = ttk.Entry(check_frame, textvariable=self.screen_y, width=6)
         y_entry.pack(side=tk.LEFT, padx=2)
         ttk.Label(check_frame, text="监测范围px:").pack(side=tk.LEFT, padx=5)
@@ -208,6 +214,8 @@ class MultiChannelLEDControlApp:
         ttk.Label(self.speed_frame, text="音频信号增益:").pack(side=tk.LEFT, padx=5)
         audio_gain_Input = ttk.Entry(self.speed_frame, textvariable=self.audio_gain, width=6)
         audio_gain_Input.pack(side=tk.LEFT, padx=2)
+        tk.Checkbutton(self.speed_frame, text="动态调整峰值", variable=self.audio_Dynamic_Peak).pack(side=tk.LEFT, padx=5)
+        
 
         # 通道控制区域
         channels_frame = ttk.LabelFrame(main_frame, text="通道控制")        
@@ -908,7 +916,7 @@ class MultiChannelLEDControlApp:
                     self.screen_g = current_g   
                     self.screen_b = current_b
                     
-                    time.sleep(0.001)  # 短暂延迟，控制过渡速度
+                    time.sleep(0.02)  # 短暂延迟，控制过渡速度
 
                 self.last_r, self.last_g, self.last_b = self.screen_r, self.screen_g, self.screen_b
                 time.sleep(0.01)
@@ -972,7 +980,7 @@ class MultiChannelLEDControlApp:
 
                     # 获取原始音频峰值
                     raw_peak = float(self.audio_gain.get()) * self.meter.GetPeakValue()
-
+                    
                     # 应用响应曲线，增强视觉动态范围
                     processed_peak = raw_peak ** response_curve
 
@@ -987,6 +995,20 @@ class MultiChannelLEDControlApp:
 
                     final_peak = round(min(peak_hold, 0.999), 5)
                     self.peak = final_peak
+                    # 动态处理峰值增益倍数，防止音频峰值太低或太高，导致观感不佳
+                    if self.audio_Dynamic_Peak.get():
+                        self.audio_peak_queue.append(raw_peak)
+                        max_peak = float(max(self.audio_peak_queue))
+                        min_peak = float(min(self.audio_peak_queue))
+                        if(min_peak>0.7 and len(self.audio_peak_queue)>=250):
+                            self.audio_gain.set(round(float(self.audio_gain.get())/max_peak,2))
+                            self.audio_peak_queue.clear()
+                            #print(round(float(self.audio_gain.get())/max_peak,2))
+                            self.log_diagnostic(f"音频峰值过高，自动降低增益为: {self.audio_gain.get()}")
+                        elif(max_peak<0.5 and max_peak>0.01 and len(self.audio_peak_queue)>=250):
+                            self.audio_gain.set(round(float(self.audio_gain.get())/(max_peak),2))
+                            self.audio_peak_queue.clear()
+                            self.log_diagnostic(f"音频峰值过低，自动提高增益为: {self.audio_gain.get()}")
 
                 except Exception as e:
                     self.status_bar.config(text=f"音频线程错误: {e},请尝试重新切换至音频模式")
@@ -1001,7 +1023,13 @@ class MultiChannelLEDControlApp:
         self.status_bar.config(text=f"成功停止音频监听线程")
         # print("Stopping audio thread")
         self.audio_running = False
-    
+
+    def on_tray_click(self, icon, event):
+        print("ck")
+        # event.count 表示点击次数：1=单击，2=双击
+        if event.count == 2:  # 双击托盘图标
+            self.show_window(self, icon)  # 调用显示窗口函数
+
     def create_tray_icon(self):
         # 确保只创建一个托盘图标实例
         if self.tray is None:
