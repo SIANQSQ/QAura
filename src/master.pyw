@@ -68,6 +68,8 @@ class MultiChannelLEDControlApp:
         self.audio_device_name = None
         self.audio_peak_queue = deque(maxlen=300)  # 存储最近300个峰值数据（5秒）
         self.audio_Dynamic_Peak = tk.BooleanVar(value=True)  #动态峰值开关
+        self.peak_addon = 0  #峰值和，表征声音的能量
+        self.detect_peroid = 250 #60x秒数
         #屏幕捕获模式参数
         self.screen_x = tk.IntVar(value=100)
         self.screen_y = tk.IntVar(value=100)
@@ -957,6 +959,9 @@ class MultiChannelLEDControlApp:
         except Exception as e:
             self.status_bar.config(text=f"音频初始化错误: {e},请检查音频设备")
             self.log_diagnostic(f"音频初始化错误: {e}")
+
+    
+
     def start_audio_thread(self):
         self.status_bar.config(text=f"正在启动音频监听线程")
         self.set_meter()
@@ -966,7 +971,7 @@ class MultiChannelLEDControlApp:
             self.log_diagnostic(f"成功启动音频监听线程,监听设备: {self.audio_device_name}")
             # 视觉效果增强参数
             peak_hold = 0.0  # 用于峰值保持效果
-            peak_decay = 0.95  # 峰值衰减速率 (值越小衰减越快)
+            peak_decay = 0.98  # 峰值衰减速率 (值越小衰减越快)
             min_threshold = 0.02  # 最小阈值，过滤微小声音
             response_curve = 1.5  # 响应曲线指数，值越大对强信号越敏感
             comtypes.CoInitialize()
@@ -997,18 +1002,23 @@ class MultiChannelLEDControlApp:
                     self.peak = final_peak
                     # 动态处理峰值增益倍数，防止音频峰值太低或太高，导致观感不佳
                     if self.audio_Dynamic_Peak.get():
+                        
                         self.audio_peak_queue.append(raw_peak)
+                        self.peak_addon += raw_peak
                         max_peak = float(max(self.audio_peak_queue))
                         min_peak = float(min(self.audio_peak_queue))
-                        if(min_peak>0.7 and len(self.audio_peak_queue)>=250):
-                            self.audio_gain.set(round(float(self.audio_gain.get())/max_peak,4))
-                            self.audio_peak_queue.clear()
-                            #print(round(float(self.audio_gain.get())/max_peak,2))
-                            self.log_diagnostic(f"音频峰值过高，自动降低增益为: {self.audio_gain.get()}")
-                        elif(max_peak<0.5 and max_peak>0.01 and len(self.audio_peak_queue)>=250):
-                            self.audio_gain.set(round(float(self.audio_gain.get())/(max_peak),4))
-                            self.audio_peak_queue.clear()
-                            self.log_diagnostic(f"音频峰值过低，自动提高增益为: {self.audio_gain.get()}")
+                        if(len(self.audio_peak_queue)>=self.detect_peroid):
+                            if(self.peak_addon > 0.8*self.detect_peroid):
+                                self.peak_addon = 0
+                                self.audio_gain.set(round(float(self.audio_gain.get())/max_peak,4))
+                                self.audio_peak_queue.clear()
+                                #print(round(float(self.audio_gain.get())/max_peak,2))
+                                self.log_diagnostic(f"音频峰值过高，自动降低增益为: {self.audio_gain.get()}")
+                            elif(self.peak_addon < 0.2*self.detect_peroid and min_peak > 0):
+                                self.audio_gain.set(round(float(self.audio_gain.get())/(max_peak),4))
+                                self.audio_peak_queue.clear()
+                                self.peak_addon = 0
+                                self.log_diagnostic(f"音频峰值过低，自动提高增益为: {self.audio_gain.get()}")
 
                 except Exception as e:
                     self.status_bar.config(text=f"音频线程错误: {e},请尝试重新切换至音频模式")
