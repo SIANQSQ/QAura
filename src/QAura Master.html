@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QAura Master - Pure Frontend</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #151515;
+      --panel: #222222;
+      --text: #f4f7ef;
+      --muted: #b8c0ad;
+      --border: #3a3a3a;
+      --accent: #BFFF00;
+      --danger: #ff5c5c;
+      --ok: #BFFF00;
+      --shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    .app { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
+    fieldset, .card { border: 1px solid var(--border); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }
+    fieldset { padding: 14px; margin: 0 0 14px; }
+    legend { padding: 0 8px; color: var(--muted); font-weight: 700; }
+    .row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+    .grid { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+    input, select, button { font: inherit; }
+    input[type="text"], select { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: color-mix(in srgb, var(--panel), var(--bg) 18%); color: var(--text); min-height: 38px; }
+    input[type="range"] { width: 160px; }
+    input[type="color"] { width: 42px; height: 36px; border: 1px solid var(--border); border-radius: 9px; padding: 2px; background: transparent; }
+    button { border: 1px solid color-mix(in srgb, var(--accent), #222222 55%); border-radius: 10px; padding: 8px 12px; background: var(--accent); color: #222222; font-weight: 700; cursor: pointer; transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease; box-shadow: 0 0 0 rgba(191, 255, 0, 0); }
+    button:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 0 16px rgba(191, 255, 0, 0.28); }
+    button.secondary { background: #222222; color: var(--accent); border-color: color-mix(in srgb, var(--accent), #222222 50%); }
+    button.danger { background: #2a2a2a; color: #ff7a7a; border-color: #7a3030; }
+    .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .status-dot { width: 12px; height: 12px; border-radius: 999px; background: var(--danger); display: inline-block; box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger), transparent 78%); }
+    .status-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok), transparent 78%); }
+    .channel { padding: 14px; }
+    .channel-title { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-weight: 800; }
+    .hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .preview { width: 34px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+    textarea { width: 100%; min-height: 190px; border: 1px solid var(--border); border-radius: 14px; padding: 12px; resize: vertical; background: #111111; color: #BFFF00; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.45; }
+    .statusbar { position: sticky; bottom: 0; margin-top: 14px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--panel), transparent 4%); backdrop-filter: blur(12px); padding: 10px 12px; color: var(--muted); }
+    code { padding: 2px 5px; border-radius: 6px; background: color-mix(in srgb, var(--border), transparent 50%); }
+
+    @media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } header { align-items: flex-start; flex-direction: column; } }
+    
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div>
+        <h1>QAura Master</h1>
+        <div class="subtitle">欢迎使用 QAura </div>
+      </div>
+      <div class="quick-actions" id="quickActions"></div>
+    </header>
+
+    <fieldset>
+      <legend>连接控制</legend>
+      <div class="row">
+        <label>QAura IP:<input id="ipInput" type="text" value="192.168.31.105" inputmode="decimal"></label>
+        <button id="connectBtn">连接至设备</button>
+        <label>扫描前缀:<input id="baseIpInput" type="text" value="192.168.31." style="width: 132px"></label>
+        <button id="scanBtn" class="secondary">扫描网络</button>
+        <span id="connDot" class="status-dot" aria-hidden="true"></span>
+        <strong id="connLabel">未连接</strong>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>颜色设置</legend>
+      <div class="row">
+        <label><input id="syncColor" type="checkbox" checked> 同步颜色</label>
+        <label><input id="browserThemeColor" type="checkbox"> 使用页面主题色</label>
+      </div>
+      <div class="row">
+        <label>亮度:<input id="brightness" type="range" min="0" max="100" value="100"></label>
+        <span id="brightnessValue">100%</span>
+        <label>速度:<input id="speed" type="range" min="0" max="100" value="50"></label>
+        <span id="speedValue">50%</span>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>通道控制</legend>
+      <div class="grid" id="channels"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>日志</legend>
+      <div class="row">
+        <button id="pingBtn" class="secondary">测试 HTTP 响应</button>
+        <button id="clearLogBtn" class="secondary">清除日志</button>
+      </div>
+      <textarea id="log" readonly>欢迎使用 QAura 
+</textarea>
+    </fieldset>
+
+    <div class="statusbar" id="statusBar">就绪</div>
+  </main>
+
+  <script>
+    const NL = String.fromCharCode(10);
+    const LED_NAMES = ["桌子下", "显示器下", "显示器上", "桌子上", "桌子侧", "柜子上", "---", "---"];
+    const MODES = [["关闭", 0], ["纯色", 1], ["彩虹", 2], ["呼吸", 3], ["声音", 4], ["屏幕", 5], ["渐变", 6]];
+    const WS2812B_PIN = [4, 18, 19, 21, 22, 23, 25, 26];
+    const LED_NUM = [53, 22, 28, 39, 33, 40, 0, 0];
+
+    const state = {
+      connected: false,
+      channels: WS2812B_PIN.map((pin, i) => ({ pin, count: LED_NUM[i], color: "#ffffff", mode: 2 }))
+    };
+
+    const $ = id => document.getElementById(id);
+    const ip = () => $("ipInput").value.trim();
+    const endpoint = path => `http://${ip()}${path}`;
+
+    function setStatus(message) {
+      $("statusBar").textContent = message;
+    }
+
+    function log(message) {
+      const box = $("log");
+      const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      box.value += `${now} - ${message}` + NL;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function setConnected(ok, label) {
+      state.connected = ok;
+      $("connDot").classList.toggle("ok", ok);
+      $("connLabel").textContent = label || (ok ? `已连接到: ${ip()}` : "未连接");
+    }
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, Number(n) || 0));
+    }
+
+    function hexToRgb(hex) {
+      const value = parseInt(hex.replace("#", ""), 16);
+      return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + [r, g, b].map(v => clamp(v, 0, 255).toString(16).padStart(2, "0")).join("");
+    }
+
+    function isIpPrefix(text) {
+      const parts = text.split(".");
+      return parts.length === 4 && parts[3] === "" && parts.slice(0, 3).every(p => Number(p) >= 0 && Number(p) <= 255 && p !== "");
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal, cache: "no-store" });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function getText(url, timeoutMs = 2000) {
+      const res = await fetchWithTimeout(url, {}, timeoutMs);
+      return await res.text();
+    }
+
+    async function sendGet(path, params = {}, timeoutMs = 2000) {
+      const url = new URL(endpoint(path));
+      Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+      return fetchWithTimeout(url.toString(), {}, timeoutMs);
+    }
+
+    async function testConnection() {
+      log(`正在测试连接到 ${ip()}...`);
+      try {
+        const text = await getText(endpoint("/"), 2500);
+        if (text.includes("QAura") || text.includes("Multi-Channel")) {
+          setConnected(true, `已连接到: ${ip()}`);
+          setStatus(`已连接到 QAura: ${ip()}`);
+          log("连接成功！QAura 已准备就绪。");
+          return true;
+        }
+        setConnected(false, "设备响应异常");
+        setStatus("设备响应异常");
+        log(`错误: 设备响应异常，返回内容: ${text.slice(0, 80)}`);
+        return false;
+      } catch (error) {
+        setConnected(false, error.name === "AbortError" ? "连接超时" : "无法连接");
+        setStatus(`连接失败: ${error.message}`);
+        log(`错误: ${error.message}。`);
+        return false;
+      }
+    }
+
+    async function scanNetwork() {
+      const base = $("baseIpInput").value.trim();
+      if (!isIpPrefix(base)) {
+        log("扫描前缀格式错误，例如 192.168.31.");
+        return;
+      }
+
+      log(`开始浏览器可用的 HTTP 扫描: ${base}1-254`);
+      setStatus("扫描中...");
+      const concurrency = 16;
+      let found = false;
+      let next = 1;
+
+      async function worker() {
+        while (!found && next <= 254) {
+          const n = next++;
+          const candidate = `${base}${n}`;
+          try {
+            const text = await getText(`http://${candidate}/`, 800);
+            if (text.includes("QAura") || text.includes("Multi-Channel")) {
+              found = true;
+              $("ipInput").value = candidate;
+              log(`发现设备: ${candidate}`);
+              await testConnection();
+            }
+          } catch (error) {
+          }
+        }
+      }
+
+      await Promise.all(Array.from({ length: concurrency }, worker));
+      if (!found) {
+        log("扫描完成，未找到设备。浏览器扫描能力有限，建议手动输入 QAura IP。");
+        setStatus("扫描完成，未找到设备");
+      }
+    }
+
+    async function setMode(channel, modeId) {
+      const sync = $("syncColor").checked ? 1 : 0;
+      try {
+        await sendGet("/set_mode", { channel: channel + 1, mode: modeId, sync: sync || channel === -1 ? 1 : 0 });
+        if (sync || channel === -1) {
+          state.channels.forEach((ch, i) => {
+            ch.mode = modeId;
+            $(`mode-${i}`).value = String(modeId);
+          });
+          log(`设置所有通道模式: [ ${MODES[modeId]?.[0] || modeId} ]`);
+          setStatus("全部通道模式设置成功");
+        } else {
+          state.channels[channel].mode = modeId;
+          log(`设置通道 ${channel + 1} 模式: [ ${MODES[modeId]?.[0] || modeId} ]`);
+          setStatus(`通道 ${channel + 1} 模式设置成功`);
+        }
+      } catch (error) {
+        setStatus(`模式设置错误: ${error.message}`);
+        log(`模式设置错误: ${error.message}`);
+      }
+    }
+
+    async function sendColor(channel, r, g, b) {
+      const sync = $("syncColor").checked || channel === -1 ? 1 : 0;
+      try {
+        await sendGet("/set_color", { channel: channel + 1, r, g, b, sync });
+        if (sync) {
+          state.channels.forEach((ch, i) => {
+            ch.color = rgbToHex(r, g, b);
+            ch.mode = 1;
+            $(`color-${i}`).value = ch.color;
+            $(`preview-${i}`).style.background = ch.color;
+            $(`mode-${i}`).value = "1";
+          });
+        } else if (channel >= 0) {
+          state.channels[channel].color = rgbToHex(r, g, b);
+          $(`preview-${channel}`).style.background = state.channels[channel].color;
+        }
+        log(`设置通道 ${channel + 1} 颜色: R=${r}, G=${g}, B=${b}, SYNC=${sync}`);
+        setStatus(`颜色设置成功: RGB(${r}, ${g}, ${b})`);
+      } catch (error) {
+        setStatus(`颜色设置错误: ${error.message}`);
+        log(`颜色设置错误: ${error.message}`);
+      }
+    }
+
+    let brightnessTimer = 0;
+    function scheduleBrightness(value) {
+      $("brightnessValue").textContent = `${value}%`;
+      clearTimeout(brightnessTimer);
+      brightnessTimer = setTimeout(() => setBrightness(value), 120);
+    }
+
+    async function setBrightness(value) {
+      try {
+        await sendGet("/set_brightness", { value });
+        log(`设置亮度: ${value}%`);
+        setStatus(`亮度设置成功: ${value}%`);
+      } catch (error) {
+        setStatus(`亮度设置错误: ${error.message}`);
+      }
+    }
+
+    let speedTimer = 0;
+    function scheduleSpeed(value) {
+      $("speedValue").textContent = `${value}%`;
+      clearTimeout(speedTimer);
+      speedTimer = setTimeout(() => setSpeed(value), 120);
+    }
+
+    async function setSpeed(value) {
+      try {
+        await sendGet("/set_speed", { value });
+        log(`设置速度: ${value}%`);
+        setStatus(`速度设置成功: ${value}%`);
+      } catch (error) {
+        setStatus(`速度设置错误: ${error.message}`);
+      }
+    }
+
+    function applyBrowserThemeColor() {
+      if (!$("browserThemeColor").checked) return;
+      const cssColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2f80ed";
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = cssColor;
+      const normalized = ctx.fillStyle.startsWith("#") ? ctx.fillStyle : "#2f80ed";
+      const { r, g, b } = hexToRgb(normalized);
+      sendColor(-1, r, g, b);
+      log("已使用页面主题色。");
+    }
+
+    function renderChannels() {
+      const container = $("channels");
+      container.innerHTML = "";
+      state.channels.forEach((ch, i) => {
+        const card = document.createElement("section");
+        card.className = "card channel";
+        card.innerHTML = `
+          <div class="channel-title">
+            <span>通道 ${i + 1}</span>
+            <span class="hint">${LED_NAMES[i]}</span>
+          </div>
+          <div class="row">
+            <label>模式:
+              <select id="mode-${i}">
+                ${MODES.map(([name, id]) => `<option value="${id}" ${id === ch.mode ? "selected" : ""}>${name}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label>颜色:<input id="color-${i}" type="color" value="${ch.color}"></label>
+            <span class="preview" id="preview-${i}" style="background: ${ch.color}"></span>
+          </div>
+          <div class="hint">引脚: ${ch.pin}　LED 数目: ${ch.count}</div>
+        `;
+        container.appendChild(card);
+        card.querySelector(`#mode-${i}`).addEventListener("change", event => setMode(i, Number(event.target.value)));
+        card.querySelector(`#color-${i}`).addEventListener("input", event => {
+          const { r, g, b } = hexToRgb(event.target.value);
+          sendColor(i, r, g, b);
+        });
+      });
+    }
+
+    function renderQuickActions() {
+      const container = $("quickActions");
+      container.innerHTML = "";
+      MODES.forEach(([name, id]) => {
+        const button = document.createElement("button");
+        button.className = id === 0 ? "danger" : "secondary";
+        button.textContent = name;
+        button.addEventListener("click", () => setMode(-1, id));
+        container.appendChild(button);
+      });
+    }
+
+    function bindEvents() {
+      $("connectBtn").addEventListener("click", testConnection);
+      $("scanBtn").addEventListener("click", scanNetwork);
+      $("pingBtn").addEventListener("click", testConnection);
+      $("clearLogBtn").addEventListener("click", () => { $("log").value = "日志已清除" + NL; });
+      $("brightness").addEventListener("input", event => scheduleBrightness(event.target.value));
+      $("speed").addEventListener("input", event => scheduleSpeed(event.target.value));
+      $("browserThemeColor").addEventListener("change", applyBrowserThemeColor);
+    }
+
+    function init() {
+      renderQuickActions();
+      renderChannels();
+      bindEvents();
+      setInterval(() => { if (!state.connected) testConnection(); }, 10000);
+    }
+
+    init();
+  </script>
+</body>
+</html>

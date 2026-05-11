@@ -192,11 +192,13 @@ void parseSerialCommand() {
 
 
 void handleRoot() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   server.send(200, "text/plain", "Welcome to QAura");
 }
 
 void handleSetMode() {
   if (server.hasArg("mode")&&server.hasArg("channel")) {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     if (xSemaphoreTake(ledMutex, 100 / portTICK_PERIOD_MS) == pdTRUE) {
     int mode = server.arg("mode").toInt();
     if(server.hasArg("sync"))
@@ -224,6 +226,7 @@ void handleSetMode() {
 
 void handleSetColor() {
   if (server.hasArg("channel") && server.hasArg("r") && server.hasArg("g") && server.hasArg("b") && server.hasArg("sync")) {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     if (xSemaphoreTake(ledMutex, 100 / portTICK_PERIOD_MS) == pdTRUE) {
     uint8_t r = server.arg("r").toInt();
     uint8_t g = server.arg("g").toInt();
@@ -258,8 +261,10 @@ void handleSetBrightness() {
   if (server.hasArg("value")) {
     brightness = server.arg("value").toInt();
     FastLED.setBrightness(brightness);
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "text/plain", "Brightness set: " + String(brightness));
   } else {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(400, "text/plain", "Missing brightness parameter");
   }
 }
@@ -267,8 +272,10 @@ void handleSetBrightness() {
 void handleSetSpeed() {
   if (server.hasArg("value")) {
     speed = server.arg("value").toInt();
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "text/plain", "Speed set: " + String(speed));
   } else {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(400, "text/plain", "Missing speed parameter");
   }
 }
